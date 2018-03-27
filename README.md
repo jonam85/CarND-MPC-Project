@@ -115,7 +115,7 @@ Note that the fg[0] is dedicated for the cost values to be used by the IPOPT sol
 
 The following boundaries were added to the solver input such that there shall be a limitation in the minimum and maximum values of the control outputs.
 
-![Constraints](D:\Manoj_Files\Education\Udacity\SDC_ND\Term2\CarND-MPC-Project\media\Constraints.png)
+![Constraints](media/Constraints.png)
 
   
 
