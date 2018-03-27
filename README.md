@@ -1,7 +1,206 @@
 # CarND-Controls-MPC
-Self-Driving Car Engineer Nanodegree Program
+
+Author : Manoj Kumar Subramanian
+
+------
+
+## Overview
+
+This repository is as part of my Submission to the Project 5: Model Predictive Control Project for the Udacity Self Driving Car Nano Degree Program Term 2.
+
+In this project,  a Model Predictive controller is realized in C++ to provide the control signals for a vehicle in a simulated environment. This project involves the Term 2 Simulator. The simulator will provide the x,y co-ordinates of waypoints of a track for a few steps, the simulated vehicle's x, y position, its orientation, speed, steering angle and the throttle value. The Model Predictive control has to use these value and provide the target steering angle and throttle values to the simulator to keep the simulated vehicle on the track.
+
+Udacity has provided the following as a starter for this project.
+
+1. A [GitHub repo with starter code](https://github.com/udacity/CarND-MPC-Project) that was forked for this project.
+2. A simulator, downloaded from the [releases](https://github.com/udacity/self-driving-car-sim/releases) page of the project repo.
 
 ---
+
+## Project Goals
+
+The goals of this project are the following:
+
+- The code must compile without any errors with cmake and make
+- MPC class has to be implemented in C++ and the same has to be used to fine tune the control parameters of maneuvering the vehicle around the track in the simulator
+- Reflections to be provided on the model created, the hyper parameters setting, pre-processing, latency and tuning components
+- Simulation of the vehicle driving itself should meet the criteria of not leaving out of track
+
+------
+
+## Rubric Points
+
+### Compiling without any errors
+
+I have used Docker for Windows using the DockerToolbox setup and pulled the Udacity's Carnd control kit docker container which constituted the necessary tools required (including cmake, make, gcc & git) for the project.
+
+**<u>Basic Build Instructions</u>**
+
+1. Clone this repo.
+
+2. Make a build directory: `mkdir build && cd build`
+
+3. Compile: `cmake .. && make` 
+
+   - On windows, you may need to run: `cmake .. -G "Unix Makefiles" && make`
+
+4. Run it: `./mpc` 
+
+   The program should wait listening to port 4567.
+
+**<u>Running the simulator</u>**
+
+Before running the simulator, configure the port forwarding to the port 4567 since the simulator and the c++ program talk using the uWebSocketIO in port 4567.
+
+Switch to the Project 5: MPC Controller in the simulator and press SELECT. The simulator will send the current state of the vehicle in port 4567 which is used by the C++ program. In return, the program provides the control data for Steering and Acceleration which is used by the simulator to navigate the vehicle through the track.
+
+INPUT: values provided by the simulator to the c++ program
+
+- ["ptsx"] => the x co-ordinates of the way points of the track for next few samples
+- ["ptsy"] => the y co-ordinates of the way points of the track for next few samples
+- ["x"] => x co-ordinate of current position of the vehicle
+- ["y"] => y co-ordinate of current position of the vehicle
+- ["psi"] => current orientation of the vehicle
+- ["speed"] => current speed of the vehicle in mph
+- ["steering_angle"] => current steering angle
+- ["throttle"] => current throttle value
+
+OUTPUT: values provided by the c++ program to the simulator
+
+- ["steering_angle"] <= target steering angle for which the car should drive
+- ["throttle"] <= target throttle position to maintain speed
+- ["mpc_x"] <= the x co-ordinates of the predicted path the vehicle should follow for visualization
+- ["mpc_y"] <= the y co-ordinates of the predicted path the vehicle should follow for visualization
+- ["next_x"] <= the x co-ordinates of the path given by the simulator in car-coordinates for visualization
+- ["next_y"] <= the y co-ordinates of the path given by the simulator in car-coordinates for visualization
+
+------
+
+### **MPC Implementation**
+
+The majority of the code are referenced from the MPC quiz section mentioned as part of the course. The following sections are implemented in the program.
+
+**States**
+
+The following states are assumed for this project based on the general kinematic model of a vehicle. x,y position of the vehicle, psi - orientation, v - speed, cte - cross track error, epsi - error in orientation. These states are fed into the IPOPT solver to produce the desired control parameters of Steering Angle (delta) and throttle (a).
+
+![State](media/State.png)
+
+**Model**
+
+The model which is described in the lecture videos is implemented in the FG_eval class, having each state variables to N number of points with the interval of dt.
+
+![Model](media/Model.png)
+
+      // Recall the equations for the model:
+      // x_[t+1] = x[t] + v[t] * cos(psi[t]) * dt
+      // y_[t+1] = y[t] + v[t] * sin(psi[t]) * dt
+      // psi_[t+1] = psi[t] + v[t] / Lf * delta[t] * dt
+      // v_[t+1] = v[t] + a[t] * dt
+      // cte[t+1] = f(x[t]) - y[t] + v[t] * sin(epsi[t]) * dt
+      // epsi[t+1] = psi[t] - psides[t] + v[t] * delta[t] / Lf * dt
+      fg[1 + x_start + t] = x1 - (x0 + v0 * CppAD::cos(psi0) * dt);
+      fg[1 + y_start + t] = y1 - (y0 + v0 * CppAD::sin(psi0) * dt);
+      fg[1 + psi_start + t] = psi1 - (psi0 - v0 * delta0 / Lf * dt);
+      fg[1 + v_start + t] = v1 - (v0 + a0 * dt);
+      fg[1 + cte_start + t] =
+          cte1 - ((f0 - y0) + (v0 * CppAD::sin(epsi0) * dt));
+      fg[1 + epsi_start + t] =
+          epsi1 - ((psi0 - psides0) - v0 * (delta0 / Lf) * dt);
+Note that the fg[0] is dedicated for the cost values to be used by the IPOPT solver.
+
+
+
+**Variable upper and lower bounds**
+
+The following boundaries were added to the solver input such that there shall be a limitation in the minimum and maximum values of the control outputs.
+
+![Constraints](D:\Manoj_Files\Education\Udacity\SDC_ND\Term2\CarND-MPC-Project\media\Constraints.png)
+
+  
+
+Steering limited to -25 deg to 25 deg (0.436332 in radians)
+
+    // The upper and lower limits of delta are set to -25 and 25
+    // degrees (values in radians).
+    for (unsigned int i = delta_start; i < a_start; i++) 
+    {
+      vars_lowerbound[i] = -0.436332;
+      vars_upperbound[i] = 0.436332;
+    }
+Acceleration output is limited to -1(full brake) to +1(full throttle)
+    // Acceleration/decceleration upper and lower limits.
+    for (unsigned int i = a_start; i < n_vars; i++) 
+    {
+      	vars_lowerbound[i] = -1.0;
+    	vars_upperbound[i] = 1.0;
+    }
+  
+
+**Timestep length and Elapsed Duration (N and dt)**
+
+Various values have been tried in this project with the combinations as (N = 10, dt = 0.2), (N= 10, dt = 0.1), (N= 20, dt = 0.05), (N = 30, dt = 0.05), (N=15, dt = 0.1) etc. The more the value of N, the vehicle tend to oversteer, the lesser value of N, produced understeer. The values of **<u>(N = 20, dt = 0.05)</u>** is finally arrived after many iterations.
+
+
+
+**Polynomial Fitting**
+
+The polyfit function already defined in the provided source code was used for finding the best fit polynomial for the given way points. 
+
+**Pre-processing**
+
+The way points provided from the simulator were w.r.t to the map co-ordinates. These were transformed to the car co-ordinates using the following code
+
+```c++
+// Convert vehicle co-ordinates to map co-ordinates
+veh_x = (ptsx[j] - px) * cos(-psi) - (ptsy[j] - py) * sin(-psi);
+veh_y = (ptsy[j] - py) * cos(-psi) + (ptsx[j] - px) * sin(-psi);
+```
+Based on the Polyfit polynomial co-efficients, the cross track error(cte) at x=0, and the orientation error (epsi) were calculated using the Poly eval method.
+
+**Latency**
+
+Since the project requested to deliberately add a delay of 100 microseconds for latency, this time is considered as a latency delay time (delay_t) in the program.
+
+The same model represented above is delayed by this time and the new states are arrived using the below calculations.
+
+    // State after delay.          
+    //transition from t to t+1 (time step is delta_t = 0.1)
+    // using the general kinematic equations
+    
+    double delay_x = v * cos(0) * delay_t; // Assuming initial x = 0 in car co-ordinate
+    double delay_y = v * sin(0) * delay_t; // Assuming initial y = 0 in car co-ordinate
+    double delay_psi = -v * steer_value_i * delay_t / Lf ; // Assuming initial psi = 0 in car co-ordinate
+    double delay_v = v + throttle_value_i * delay_t; 
+    double delay_cte = cte + v * sin(epsi) * delay_t;
+    double delay_epsi = epsi-(v * steer_value_i * delay_t / Lf);
+The delayed state values were used in solver for the solver to predict the new values.
+
+    // Update the states to be used in ipopt solver
+    Eigen::VectorXd state(6);
+    state << delay_x, delay_y, delay_psi, delay_v, delay_cte, delay_epsi;
+------
+
+## Simulation Video Link
+
+Here is the link for my video running at a constant speed of 68mph with the cost parameters set as 250000 to minimize the sequential actuations of steering and the cost parameter for acceleration deviation from 0 as 50. https://youtu.be/nrt0mMDVCY0
+
+
+
+**Additional Video links for comparison**
+
+`      fg[0] += cost_value[4] * CppAD::pow(vars[a_start + t], 2);`
+
+`fg[0] += cost_value[5] * CppAD::pow(vars[delta_start + t + 1] - vars[delta_start + t], 2);`
+
+| **<u>Video with nominal track following</u>** | **<u>Video for aggressive track following</u>** | **<u>Video for smooth track following</u>** |
+| ---------------------------------------- | ---------------------------------------- | ---------------------------------------- |
+| https://youtu.be/nrt0mMDVCY0             | https://youtu.be/7_c0i2hVCk8             | https://youtu.be/N3Kp-TdXb6U             |
+| `cost_value[4] = 50; cost_value[5] = 250000` | `cost_value[4] = 25; cost_value[5] = 250000` | `cost_value[4] = 100; cost_value[5] = 50000` |
+
+
+
+------
 
 ## Dependencies
 
@@ -37,72 +236,3 @@ Self-Driving Car Engineer Nanodegree Program
 2. Make a build directory: `mkdir build && cd build`
 3. Compile: `cmake .. && make`
 4. Run it: `./mpc`.
-
-## Tips
-
-1. It's recommended to test the MPC on basic examples to see if your implementation behaves as desired. One possible example
-is the vehicle starting offset of a straight line (reference). If the MPC implementation is correct, after some number of timesteps
-(not too many) it should find and track the reference line.
-2. The `lake_track_waypoints.csv` file has the waypoints of the lake track. You could use this to fit polynomials and points and see of how well your model tracks curve. NOTE: This file might be not completely in sync with the simulator so your solution should NOT depend on it.
-3. For visualization this C++ [matplotlib wrapper](https://github.com/lava/matplotlib-cpp) could be helpful.)
-4.  Tips for setting up your environment are available [here](https://classroom.udacity.com/nanodegrees/nd013/parts/40f38239-66b6-46ec-ae68-03afd8a601c8/modules/0949fca6-b379-42af-a919-ee50aa304e6a/lessons/f758c44c-5e40-4e01-93b5-1a82aa4e044f/concepts/23d376c7-0195-4276-bdf0-e02f1f3c665d)
-5. **VM Latency:** Some students have reported differences in behavior using VM's ostensibly a result of latency.  Please let us know if issues arise as a result of a VM environment.
-
-## Editor Settings
-
-We've purposefully kept editor configuration files out of this repo in order to
-keep it as simple and environment agnostic as possible. However, we recommend
-using the following settings:
-
-* indent using spaces
-* set tab width to 2 spaces (keeps the matrices in source code aligned)
-
-## Code Style
-
-Please (do your best to) stick to [Google's C++ style guide](https://google.github.io/styleguide/cppguide.html).
-
-## Project Instructions and Rubric
-
-Note: regardless of the changes you make, your project must be buildable using
-cmake and make!
-
-More information is only accessible by people who are already enrolled in Term 2
-of CarND. If you are enrolled, see [the project page](https://classroom.udacity.com/nanodegrees/nd013/parts/40f38239-66b6-46ec-ae68-03afd8a601c8/modules/f1820894-8322-4bb3-81aa-b26b3c6dcbaf/lessons/b1ff3be0-c904-438e-aad3-2b5379f0e0c3/concepts/1a2255a0-e23c-44cf-8d41-39b8a3c8264a)
-for instructions and the project rubric.
-
-## Hints!
-
-* You don't have to follow this directory structure, but if you do, your work
-  will span all of the .cpp files here. Keep an eye out for TODOs.
-
-## Call for IDE Profiles Pull Requests
-
-Help your fellow students!
-
-We decided to create Makefiles with cmake to keep this project as platform
-agnostic as possible. Similarly, we omitted IDE profiles in order to we ensure
-that students don't feel pressured to use one IDE or another.
-
-However! I'd love to help people get up and running with their IDEs of choice.
-If you've created a profile for an IDE that you think other students would
-appreciate, we'd love to have you add the requisite profile files and
-instructions to ide_profiles/. For example if you wanted to add a VS Code
-profile, you'd add:
-
-* /ide_profiles/vscode/.vscode
-* /ide_profiles/vscode/README.md
-
-The README should explain what the profile does, how to take advantage of it,
-and how to install it.
-
-Frankly, I've never been involved in a project with multiple IDE profiles
-before. I believe the best way to handle this would be to keep them out of the
-repo root to avoid clutter. My expectation is that most profiles will include
-instructions to copy files to a new location to get picked up by the IDE, but
-that's just a guess.
-
-One last note here: regardless of the IDE used, every submitted project must
-still be compilable with cmake and make./
-
-## How to write a README
-A well written README file can enhance your project and portfolio.  Develop your abilities to create professional README files by completing [this free course](https://www.udacity.com/course/writing-readmes--ud777).
